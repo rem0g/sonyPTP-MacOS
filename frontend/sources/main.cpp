@@ -291,13 +291,15 @@ p3=0x00000000, p4=0x00000000, p5=0x00000000
 #include "command.h"
 #include "serverclient.h"
 #include "socket.hpp"
+#include "websocket_integration.h"
+#include "sony_device_finder.h"
 
 void usage() {
   fprintf(stderr, "USAGE: control command [OPTION]\n\n");
   fprintf(stderr,
           "Commands:\n"
           "  send, recv, wait, clear, reset, open, close, auth, getall, get, "
-          "getobject, getliveview\n");
+          "getobject, getliveview, websocket, listsony\n");
   fprintf(stderr,
           "Options:\n"
           "  --op=OPERATION-CODE          Operation code\n"
@@ -309,6 +311,15 @@ void usage() {
           "  --if=infile                  Input from infile\n"
           "  --bus=BUS-NUMBER             USB bus number\n"
           "  --dev=DEV-NUMBER             USB assigned device number\n"
+          "  --sony                       Auto-detect Sony camera (use first found)\n"
+          "  --fx30                       Auto-detect Sony FX30 camera\n"
+          "  --camera-index=N             Use camera index N (0-based, requires --sony or --fx30)\n"
+          "\n"
+          "WebSocket mode:\n"
+          "  control websocket [PORT]     Start WebSocket server (default: 8080)\n"
+          "\n"
+          "List Sony devices:\n"
+          "  control listsony             List all connected Sony cameras\n"
           "\n");
 }
 
@@ -320,6 +331,9 @@ void usage() {
 int main(int argc, char **argv) {
   int command = 0;
   int busn = 0, devn = 0;
+  bool auto_detect_sony = false;
+  bool auto_detect_fx30 = false;
+  int camera_index = 0;
   com::sony::imaging::remote::PTPTransaction transaction;
   uint16_t device_property_code = 0;
   uint32_t handle = 0;
@@ -336,7 +350,8 @@ int main(int argc, char **argv) {
       {"p2", 1, 0, 0},    {"p3", 1, 0, 0},     {"p4", 1, 0, 0},
       {"p5", 1, 0, 0},    {"size", 1, 0, 's'}, {"data", 1, 0, 'D'},
       {"log", 1, 0, 'l'}, {"op", 1, 0, 'O'},   {"if", 1, 0, 'i'},
-      {"of", 1, 0, 'o'},  {0, 0, 0, 0}};
+      {"of", 1, 0, 'o'},  {"sony", 0, 0, 0},   {"fx30", 0, 0, 0},
+      {"camera-index", 1, 0, 0}, {0, 0, 0, 0}};
 
   if (argc < 2) {
     usage();
@@ -382,6 +397,8 @@ int main(int argc, char **argv) {
     }
   }
   OPTCMP(command, "getliveview", GETLIVEVIEW);
+  OPTCMP(command, "websocket", WEBSOCKET);
+  OPTCMP(command, "listsony", LISTSONY);
 
   optind = 2;
   while (1) {
@@ -390,6 +407,18 @@ int main(int argc, char **argv) {
 
     switch (opt) {
       case 0:
+        if (!(strcmp("sony", loptions[option_index].name))) {
+          auto_detect_sony = true;
+          fprintf(stderr, "Auto-detecting Sony camera\n");
+        }
+        if (!(strcmp("fx30", loptions[option_index].name))) {
+          auto_detect_fx30 = true;
+          fprintf(stderr, "Auto-detecting Sony FX30 camera\n");
+        }
+        if (!(strcmp("camera-index", loptions[option_index].name))) {
+          camera_index = strtoll(optarg, NULL, 0);
+          fprintf(stderr, "Camera index: %d\n", camera_index);
+        }
         if (!(strcmp("p1", loptions[option_index].name))) {
           uint32_t param = strtoll(optarg, NULL, 0);
           fprintf(stderr, "p1: %u\n", param);
@@ -516,6 +545,93 @@ int main(int argc, char **argv) {
         fprintf(stderr, "getopt returned character code 0%o\n", opt);
         break;
     }
+  }
+
+  // List Sony devices command
+  if (command == LISTSONY) {
+    com::sony::imaging::remote::SonyDeviceFinder finder;
+    auto devices = finder.findSonyCameras();
+    auto fx30s = finder.findFX30Cameras();
+    
+    fprintf(stdout, "Sony Cameras Found: %zu (FX30: %zu)\n", devices.size(), fx30s.size());
+    fprintf(stdout, "%-5s %-4s %-4s %-6s %-6s %-20s %s\n", 
+            "Index", "Bus", "Dev", "VID", "PID", "Product", "Serial");
+    fprintf(stdout, "----- ---- ---- ------ ------ -------------------- ----------\n");
+    
+    for (size_t i = 0; i < devices.size(); i++) {
+      const auto& device = devices[i];
+      fprintf(stdout, "%5zu %3d  %3d  0x%04X 0x%04X %-20s %s\n",
+              i, device.bus, device.address, 
+              device.vendor_id, device.product_id,
+              device.product_name.c_str(), 
+              device.serial_number.c_str());
+    }
+    
+    if (!fx30s.empty()) {
+      fprintf(stdout, "\nFX30 Cameras:\n");
+      fprintf(stdout, "%-5s %-4s %-4s %-6s %-6s %-20s %s\n", 
+              "Index", "Bus", "Dev", "VID", "PID", "Product", "Serial");
+      fprintf(stdout, "----- ---- ---- ------ ------ -------------------- ----------\n");
+      
+      for (size_t i = 0; i < fx30s.size(); i++) {
+        const auto& device = fx30s[i];
+        fprintf(stdout, "%5zu %3d  %3d  0x%04X 0x%04X %-20s %s\n",
+                i, device.bus, device.address, 
+                device.vendor_id, device.product_id,
+                device.product_name.c_str(), 
+                device.serial_number.c_str());
+      }
+    }
+    
+    return 0;
+  }
+  
+  // Auto-detect Sony camera if requested
+  if (auto_detect_sony || auto_detect_fx30) {
+    com::sony::imaging::remote::SonyDeviceFinder finder;
+    auto devices = auto_detect_fx30 ? finder.findFX30Cameras() : finder.findSonyCameras();
+    
+    if (devices.empty()) {
+      fprintf(stderr, "No %s cameras found\n", auto_detect_fx30 ? "Sony FX30" : "Sony");
+      return 1;
+    }
+    
+    // Check if camera_index is valid
+    if (camera_index >= (int)devices.size()) {
+      fprintf(stderr, "Camera index %d out of range. Found %zu cameras.\n", 
+              camera_index, devices.size());
+      fprintf(stderr, "Use 'control listsony' to see available cameras.\n");
+      return 1;
+    }
+    
+    // Use the specified camera index
+    busn = devices[camera_index].bus;
+    devn = devices[camera_index].address;
+    fprintf(stderr, "Using camera %d: %s at bus %d, device %d\n", 
+            camera_index, devices[camera_index].product_name.c_str(), busn, devn);
+  }
+
+  // WebSocket server mode
+  if (command == WEBSOCKET) {
+    int port = 8080; // Default WebSocket port
+    if (argc > 2) {
+      port = atoi(argv[2]);
+    }
+    fprintf(stderr, "Starting WebSocket server on port %d\n", port);
+    fprintf(stderr, "Press Ctrl+C to stop the server\n");
+    
+    com::sony::imaging::remote::WebSocketIntegration wsIntegration(port, busn, devn);
+    if (!wsIntegration.start()) {
+      fprintf(stderr, "Failed to start WebSocket server\n");
+      return 1;
+    }
+    
+    // Keep running until interrupted
+    while (true) {
+      sleep(1);
+    }
+    
+    return 0;
   }
 
   // offline

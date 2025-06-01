@@ -20,6 +20,8 @@
 #define GETALL 14
 #define GETOBJECT 15
 #define GETLIVEVIEW 16
+#define WEBSOCKET 17
+#define LISTSONY 18
 
 namespace com {
 namespace sony {

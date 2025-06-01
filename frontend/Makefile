@@ -6,13 +6,14 @@ LIB_INC := ../libcameracontrolptp/include/
 CC := g++
 CFLAGS := -Wall -g
 override INCLUDES += -I$(LIB_INC)
+override INCLUDES += -I/opt/homebrew/include
 SYS := $(shell $(CC) -dumpmachine)
 
 TARGET := $(OUT_DIR)/control
 SRC_DIR := sources
 SCRIPTS_DIR := scripts
 OBJ_DIR := .obj
-SOURCES := main.cpp command.cpp serverclient.cpp
+SOURCES := main.cpp command.cpp serverclient.cpp websocket_server.cpp websocket_integration.cpp sony_device_finder.cpp
 ifneq (, $(findstring linux, $(SYS)))
 # Linux
 	SOURCES += socket.cpp
@@ -39,7 +40,7 @@ clean:
 	rm -rf $(TARGET) $(OBJ_DIR) $(SCRIPTS)
 
 $(TARGET): $(OBJECTS)
-	$(CC) -L$(OUT)/lib -o $@ $^ -lcameracontrolptp -lstdc++ -Wl,-rpath,@executable_path/../lib
+	$(CC) -L$(OUT)/lib -L/opt/homebrew/lib -o $@ $^ -lcameracontrolptp -lusb-1.0 -lstdc++ -lssl -lcrypto -Wl,-rpath,@executable_path/../lib
 
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)

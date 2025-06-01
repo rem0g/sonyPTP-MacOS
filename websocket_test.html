@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Control WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            font-size: 14px;
+        }
+        #log {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            background-color: #f5f5f5;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .sent {
+            color: blue;
+        }
+        .received {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        input {
+            margin: 5px;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Camera Control WebSocket Test</h1>
+        
+        <div>
+            <h3>Connection</h3>
+            <input type="text" id="wsUrl" value="ws://localhost:8080" placeholder="WebSocket URL">
+            <button onclick="connect()">Connect</button>
+            <button onclick="disconnect()">Disconnect</button>
+            <span id="status">Disconnected</span>
+        </div>
+        
+        <div>
+            <h3>Basic Commands</h3>
+            <button onclick="sendCommand('open')">Open Device</button>
+            <button onclick="sendCommand('close')">Close Device</button>
+            <button onclick="sendCommand('auth')">Authenticate</button>
+            <button onclick="sendCommand('reset')">Reset</button>
+            <button onclick="sendCommand('clear')">Clear Halt</button>
+        </div>
+        
+        <div>
+            <h3>Get Commands</h3>
+            <button onclick="sendCommand('getall')">Get All Properties</button>
+            <button onclick="sendCommand('getliveview')">Get Live View</button>
+            <button onclick="sendGet()">Get Property</button>
+            <input type="text" id="propertyCode" placeholder="Property Code (hex)" value="0xD6C6">
+            <button onclick="sendGetObject()">Get Object</button>
+            <input type="text" id="objectHandle" placeholder="Object Handle (hex)" value="0xFFFFC001">
+        </div>
+        
+        <div>
+            <h3>Send/Receive Commands</h3>
+            <button onclick="sendPTPCommand()">Send PTP Command</button>
+            <button onclick="recvPTPCommand()">Receive PTP Command</button>
+            <button onclick="sendCommand('wait')">Wait for Event</button>
+            <br>
+            <input type="text" id="opCode" placeholder="Op Code" value="0x1001">
+            <input type="text" id="p1" placeholder="P1" value="0x0">
+            <input type="text" id="p2" placeholder="P2" value="0x0">
+            <input type="text" id="p3" placeholder="P3" value="0x0">
+            <input type="text" id="data" placeholder="Data" value="0x0">
+            <input type="text" id="size" placeholder="Size" value="0">
+        </div>
+        
+        <h3>Log</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        
+        function log(message, className = '') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + className;
+            entry.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function connect() {
+            const url = document.getElementById('wsUrl').value;
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            ws = new WebSocket(url);
+            
+            ws.onopen = function() {
+                document.getElementById('status').textContent = 'Connected';
+                log('Connected to ' + url, 'sent');
+            };
+            
+            ws.onmessage = function(event) {
+                log('Received: ' + event.data, 'received');
+            };
+            
+            ws.onerror = function(error) {
+                log('Error: ' + error, 'error');
+            };
+            
+            ws.onclose = function() {
+                document.getElementById('status').textContent = 'Disconnected';
+                log('Disconnected', 'error');
+                ws = null;
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+        
+        function sendCommand(command) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+            
+            const message = command + ':';
+            ws.send(message);
+            log('Sent: ' + message, 'sent');
+        }
+        
+        function sendGet() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+            
+            const propertyCode = document.getElementById('propertyCode').value;
+            const message = 'get:' + propertyCode;
+            ws.send(message);
+            log('Sent: ' + message, 'sent');
+        }
+        
+        function sendGetObject() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+            
+            const handle = document.getElementById('objectHandle').value;
+            const message = 'getobject:' + handle;
+            ws.send(message);
+            log('Sent: ' + message, 'sent');
+        }
+        
+        function sendPTPCommand() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+            
+            const params = [];
+            params.push('op=' + document.getElementById('opCode').value);
+            if (document.getElementById('p1').value) params.push('p1=' + document.getElementById('p1').value);
+            if (document.getElementById('p2').value) params.push('p2=' + document.getElementById('p2').value);
+            if (document.getElementById('p3').value) params.push('p3=' + document.getElementById('p3').value);
+            if (document.getElementById('data').value) params.push('data=' + document.getElementById('data').value);
+            if (document.getElementById('size').value) params.push('size=' + document.getElementById('size').value);
+            
+            const message = 'send:' + params.join(',');
+            ws.send(message);
+            log('Sent: ' + message, 'sent');
+        }
+        
+        function recvPTPCommand() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+            
+            const params = [];
+            params.push('op=' + document.getElementById('opCode').value);
+            if (document.getElementById('p1').value) params.push('p1=' + document.getElementById('p1').value);
+            if (document.getElementById('p2').value) params.push('p2=' + document.getElementById('p2').value);
+            if (document.getElementById('p3').value) params.push('p3=' + document.getElementById('p3').value);
+            
+            const message = 'recv:' + params.join(',');
+            ws.send(message);
+            log('Sent: ' + message, 'sent');
+        }
+    </script>
+</body>
+</html>
